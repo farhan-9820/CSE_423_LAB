@@ -42,9 +42,27 @@ At the end of the maze, the player must complete a **quiz**.
 - Failure to answer correctly results in **no key being awarded**.  
 - The **guardian transforms into an enemy** that must be fought to proceed.
 
+## Extended Features (Tower Defense Integration)  
 
-## 15. Game Restart or Pause  
+15. **Tower Placement System**  
+   - Player can place defensive towers at predefined nodes (intersections, bridges, open courtyards).  
+
+16. **Tower Types**  
+   - **Magic Towers**: inflict burn, freeze, or paralysis.  
+   - **Mechanical Towers**: physical damage output (guns/cannons).  
+   - **Buff Towers**: aura that heals the player or boosts nearby towers.  
+
+17. **Tower Unlock Mechanism**  
+   - Towers are unlocked through item pickups inside the maze (e.g., flame crystal → Flame Tower).  
+
+18. **Dynamic Maze Interaction with Towers**  
+   - Shifting walls may block or expose towers.  
+   - Towers adapt to new enemy paths, forcing the player to adjust strategies.  
+
+19. **Player–Tower Synergy**  
+   - Player can reinforce, repair, or overcharge towers for temporary boosts.  
+   - Towers act as allies but require player management. 
+
+## 20. Game Restart or Pause  
 Core functionality includes the ability to **pause gameplay** or **restart the maze**, allowing players to reset progress or regroup after failure.  
-
-
 
