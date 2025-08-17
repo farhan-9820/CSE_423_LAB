@@ -1,4 +1,4 @@
-# Maze Runner Game – Feature Design Document
+# Game Feature Design Document
 
 ## 1. Creating the Maze (Wall Buildup)  
 The core environment will be a dynamically generated maze with walls that form pathways, dead ends, and hidden routes. These walls act as both barriers and strategic elements, guiding exploration and determining how both player and enemies move across the map.  
@@ -44,3 +44,4 @@ At the end of the maze, the player must complete a **quiz**.
 
 ## 15. Game Restart or Pause  
 Core functionality includes the ability to **pause gameplay** or **restart the maze**, allowing players to reset progress or regroup after failure.  
+
