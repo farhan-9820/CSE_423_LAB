@@ -1,7 +1,6 @@
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
-from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_18
 import random
 import time
 import math
@@ -33,7 +32,7 @@ GUNS=[]
 fovY = 90 
 keys = {}
 items_manager=None
-PLAYER_SPEED = 0.5
+PLAYER_SPEED = 0.1
 
 freeze_end_time =0
 MAZE_WIDTH = 20
@@ -60,11 +59,411 @@ trap_type=[
 
 ]
 
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
+    glColor3f(1, 1, 1)  
+    glRasterPos2f(0, 0)  
+
+    glWindowPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+
+class Player:
+    def __init__(self, startX, startY, y=WALL_HEIGHT/2, rotate=0.0):
+        self.startX = startX
+        self.startY = startY
+        self.x = startX
+        self.y = startY  
+        self.z = y
+        self.rotate = rotate
+        self.game_over = False
+        self.quadric = gluNewQuadric()
+        self.radius = 1.0
+        self.gun=False
+    def update(self):
+            speed = PLAYER_SPEED
+            rotate_speed = 2.0
+            yaw_rad = math.radians(self.rotate)
+            fwd_x = math.sin(yaw_rad)
+            fwd_y = math.cos(yaw_rad)
+
+            new_x, new_y = self.x, self.y
+
+   
+            if b'w' in keys and keys[b'w']:
+                nx = self.x + fwd_x * speed
+                ny = self.y + fwd_y * speed
+             
+                if not maze.would_collide(nx, self.y, self.radius):
+                    new_x = nx
+             
+                if not maze.would_collide(self.x, ny, self.radius):
+                    new_y = ny
+
+         
+            if b's' in keys and keys[b's']:
+                nx = self.x - fwd_x * speed
+                ny = self.y - fwd_y * speed
+                if not maze.would_collide(nx, self.y, self.radius):
+                    new_x = nx
+                if not maze.would_collide(self.x, ny, self.radius):
+                    new_y = ny
+
+            if b'd' in keys and keys[b'd']:
+                self.rotate += rotate_speed
+            if b'a' in keys and keys[b'a']:
+                self.rotate -= rotate_speed
+
+            half_maze_x = (MAZE_WIDTH * CELL_SIZE) / 2
+            half_maze_y = (MAZE_HEIGHT * CELL_SIZE) / 2
+            new_x = max(-half_maze_x, min(new_x, half_maze_x))
+            new_y = max(-half_maze_y, min(new_y, half_maze_y))
+
+            
+            self.x, self.y = new_x, new_y
 
 
 
+    def draw(self):
+            scale = CELL_SIZE / 5 
+
+            glPushMatrix()
+            glTranslatef(self.x, self.y, self.z)  
+            glRotatef(self.rotate, 0, 0, 1)      
+
+            # Body
+            glPushMatrix()
+            glTranslatef(0, 0, scale) 
+            glColor3f(0, 0.5, 0)
+            glutSolidCube(scale)
+            glPopMatrix()
+
+            # Head
+            glPushMatrix()
+            glTranslatef(0, 0, scale * 2.0)  
+            glColor3f(0, 0, 0)
+            gluSphere(self.quadric, scale/2.5, 10, 10)
+            glPopMatrix()
+
+            # Left leg
+            glPushMatrix()
+            glTranslatef(-scale/4, 0, 0)  # legs start at ground
+            glColor3f(0, 0, 1)
+            gluCylinder(self.quadric, scale/10, scale/10, scale/2, 10, 10)
+            glPopMatrix()
+
+            # Right leg
+            glPushMatrix()
+            glTranslatef(scale/4, 0, 0)
+            glColor3f(0, 0, 1)
+            gluCylinder(self.quadric, scale/10, scale/10, scale/2, 10, 10)
+            glPopMatrix()
+
+            hand_len = scale * 0.5        # same small length as before
+            hand_radius = scale / 10.0    # keep the original thin radius
+
+            # Left hand
+            glPushMatrix()
+            glTranslatef(-scale * 0.5, -hand_len * 0.5, scale)   # X: left, Y: shift back half the length so it's centered, Z: body mid
+            glRotatef(-90, 1, 0, 0)                              # rotate so cylinder's +Z becomes +Y (points forward)
+            glColor3f(0.2, 0.2, 0.2)
+            gluCylinder(self.quadric, hand_radius, hand_radius, hand_len, 10, 2)
+            glPopMatrix()
+
+            # Right hand
+            glPushMatrix()
+            glTranslatef(scale * 0.5, -hand_len * 0.5, scale)    # mirror on X
+            glRotatef(-90, 1, 0, 0)
+            glColor3f(0.2, 0.2, 0.2)
+            gluCylinder(self.quadric, hand_radius, hand_radius, hand_len, 10, 2)
+            glPopMatrix()
+
+            # Gun attached to player
+            glPushMatrix()
+            gun_length = scale * 2.0        
+            gun_thickness = scale * 0.25    
+            chest_z = scale * 1
+            forward_offset = scale + gun_length * 0.5  
+            glTranslatef(0.0, forward_offset, chest_z)
+            glScalef(gun_thickness, gun_length, gun_thickness)
+            glColor3f(0.8, 0.8, 0.1)
+            glutSolidCube(1.0)
+            glPopMatrix()
+
+
+
+            if self.gun:
+                glPushMatrix()
+                gun_length = scale * 1.5        
+                gun_thickness = scale * 0.25    
+
+                chest_z = scale * 1.2
+
+                forward_offset = scale + gun_length * 0.5  
+
+                glTranslatef(0.0, forward_offset, chest_z)
+                glScalef(gun_thickness, gun_length, gun_thickness)
+
+                glColor3f(0.8, 0.8, 0.1)
+                glutSolidCube(1.0)
+                glPopMatrix()
+
+
+
+            glPopMatrix() 
+def regen_guns(value=0):
+    global GUNS, maze
+    GUNS.clear()
+    for _ in range(4): 
+        gun_pos = generate_gun(maze, offset=15)
+        GUNS.append({'pos': gun_pos, 'picked': False})
+    glutTimerFunc(30000, regen_guns, 0)
+
+def generate_gun(maze, offset=15):
+    while True:
+        cx = random.randint(0, MAZE_WIDTH - 1)
+        cy = random.randint(0, MAZE_HEIGHT - 1)
+        cell = maze.grid[cx][cy]
+
+        if all(cell['walls'].values()):
+            continue
+
+        cell_center_x = (cx - MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE / 2
+        cell_center_y = (cy - MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE / 2
+
+        if cell['walls']['left']:
+            cell_center_x += offset
+        if cell['walls']['right']:
+            cell_center_x -= offset
+        if cell['walls']['up']:
+            cell_center_y -= offset
+        if cell['walls']['down']:
+            cell_center_y += offset
+
+        half_maze_x = (MAZE_WIDTH * CELL_SIZE) / 2 - offset
+        half_maze_y = (MAZE_HEIGHT * CELL_SIZE) / 2 - offset
+        cell_center_x = max(-half_maze_x, min(cell_center_x, half_maze_x))
+        cell_center_y = max(-half_maze_y, min(cell_center_y, half_maze_y))
+
+        return (cell_center_x, cell_center_y)
+
+
+
+
+
+def spawn_traps(maze,trap):
+    offset=2.0
+    while True:
+        cx = random.randint(0, MAZE_WIDTH - 1)
+        cy = random.randint(0, MAZE_HEIGHT - 1)
+        cell = maze.grid[cx][cy]
+
+        if all(cell['walls'].values()):
+            continue
+
+    
+        cell_center_x = (cx - MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE / 2
+        cell_center_y = (cy - MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE / 2
+
+
+        if cell['walls']['left'] == False:
+            cell_center_x -= offset
+        if cell['walls']['right'] == False:
+            cell_center_x += offset
+        if cell['walls']['up'] == False:
+            cell_center_y += offset
+        if cell['walls']['down'] == False:
+            cell_center_y -= offset
+
+        half_cell = CELL_SIZE / 2
+        cell_center_x = max((cx - MAZE_WIDTH/2) * CELL_SIZE + 1, min(cell_center_x, (cx - MAZE_WIDTH/2) * CELL_SIZE + CELL_SIZE - 1))
+        cell_center_y = max((cy - MAZE_HEIGHT/2) * CELL_SIZE + 1, min(cell_center_y, (cy - MAZE_HEIGHT/2) * CELL_SIZE + CELL_SIZE - 1))
+
+        return {
+            "pos": (cell_center_x, cell_center_y),
+            "type": trap[0],
+            "color": trap[1],
+            "active": True
+        }
+def draw_traps():
+    global TRAP
+    for trap in TRAP:
+        if trap["active"]==False:
+            continue
+        else:
+            x,y=trap["pos"]
+            z = 0.05     
+            glPushMatrix()
+            glTranslatef(x, y, z)
+            glColor3fv(trap["color"])
+            
+            radius = CELL_SIZE * 0.3
+            slices = 16  
+            stacks = 16  
+            gluSphere(gluNewQuadric(), radius, slices, stacks)
+
+        glPopMatrix()
+
+def draw_guns():
+    for gun in GUNS:
+        if gun['picked']:
+            continue  
+
+        x, y =gun["pos"]
+        z = 0.5 
+
+        glPushMatrix()
+        glTranslatef(x, y, z)
+
+        # --- Gun Body ---
+        glPushMatrix()
+        glColor3f(0.8, 0.8, 0.1)  
+        glScalef(4.0, 1.0, 1.0)   
+        glutSolidCube(1.0)
+        glPopMatrix()
+
+        # --- Barrel ---
+        glPushMatrix()
+        glTranslatef(4.0, 0.0, 0.0) 
+        glColor3f(0.2, 0.2, 0.2)     
+        glScalef(2.5, 0.3, 0.3)
+        glutSolidCube(1.0)
+        glPopMatrix()
+
+        
+        glPushMatrix()
+        glTranslatef(-1.0, 0.0, -1.0) 
+        glColor3f(0.4, 0.2, 0.0)      
+        glScalef(0.5, 0.5, 2.0)       
+        glutSolidCube(1.0)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(1.5, 0.0, 1.0)
+        glColor3f(0.1, 0.1, 0.1)
+        glScalef(0.5, 0.3, 0.3)
+        glutSolidCube(1.0)
+        glPopMatrix()
+
+        glPopMatrix()
+
+def create_bullets():
+    global BULLETS
+    scale = CELL_SIZE / 5
+    gun_length = scale * 1.5      
+    chest_z = scale * 1.2         
+
+    rd = math.radians(player.rotate)
+    dx = math.sin(rd)
+    dy = math.cos(rd)
+    forward_offset = scale + gun_length  
+    d_x = player.x + dx * forward_offset
+    d_y = player.y + dy * forward_offset
+    d_z = player.z + chest_z
+
+    BULLETS.append([[d_x, d_y, d_z], [dx, dy], True])
+
+
+def draw_bullet():
+    global game_over
+    if game_over==False:
+        for bullet in BULLETS:
+            if not bullet[2]:
+              continue
+            x, y, z = bullet[0]
+            glPushMatrix()
+            glTranslatef(x, y, z)
+            glColor3f(1.0, 0.5, 0.0)
+            glutSolidCube(0.1) 
+            glPopMatrix()
+def update_bullets():
+    global BULLETS, maze
+    speed = 0.5
+    for bullet in BULLETS:
+        if not bullet[2]:
+            continue
+        bullet[0][0] += bullet[1][0] * speed
+        bullet[0][1] += bullet[1][1] * speed
+
+        x, y, _ = bullet[0]
+        if maze.would_collide(x, y, 0.2):
+            bullet[2] = False
+
+class Items:
+    def __init__(self,maze, regen_interval=15000, offset=15):
+        self.maze = maze
+        self.regen_interval = regen_interval
+        self.offset = offset   
+        self.items = []
+        self.item_types = ["heal", "damage", "speed", "restore"]
+        self.generate_items()        
+        glutTimerFunc(self.regen_interval, self.regen_items, 0)
+    def generate_item_at_random_cell(self, item_type):
+            while True:
+                cx = random.randint(0, self.maze.width - 1)
+                cy = random.randint(0, self.maze.height - 1)
+                cell = self.maze.grid[cx][cy]
+
+                if all(cell['walls'].values()):
+                    continue  
+
+                cell_center_x = (cx - self.maze.width / 2) * CELL_SIZE + CELL_SIZE / 2
+                cell_center_y = (cy - self.maze.height / 2) * CELL_SIZE + CELL_SIZE / 2
+
+                if cell['walls']['left']:
+                    cell_center_x += self.offset
+                if cell['walls']['right']:
+                    cell_center_x -= self.offset
+                if cell['walls']['up']:
+                    cell_center_y -= self.offset
+                if cell['walls']['down']:
+                    cell_center_y += self.offset
+
+                half_maze_x = (self.maze.width * CELL_SIZE) / 2 - self.offset
+                half_maze_y = (self.maze.height * CELL_SIZE) / 2 - self.offset
+                cell_center_x = max(-half_maze_x, min(cell_center_x, half_maze_x))
+                cell_center_y = max(-half_maze_y, min(cell_center_y, half_maze_y))
+
+                color = {
+                    "heal": (0.0, 1.0, 0.0),
+                    "damage": (1.0, 0.0, 0.0),
+                    "speed": (0.0, 0.0, 1.0),
+                    "restore": (1.0, 1.0, 0.0)
+                }[item_type]
+
+                return {
+                    "pos": (cell_center_x, cell_center_y),
+                    "type": item_type,
+                    "color": color,
+                    "picked": False,
+                    "float_offset": 0.0
+                }
+
+    def generate_items(self):
+            self.items.clear()
+            for item_type in self.item_types:
+                for i in range(2):
+                    self.items.append(self.generate_item_at_random_cell(item_type))
+
+    def regen_items(self, value=0):
+            self.generate_items()
+            glutTimerFunc(self.regen_interval, self.regen_items, 0)
+
+    def update(self):
+            for item in self.items:
+                item['float_offset'] = math.sin(glutGet(GLUT_ELAPSED_TIME) * 0.003) * 0.2
+
+    def draw(self):
+            for item in self.items:
+                if item['picked']:
+                    continue
+                x, y = item['pos']
+                z = 0.5 + item['float_offset']
+                glPushMatrix()
+                glTranslatef(x, y, z)
+                glColor3fv(item['color'])
+                glutSolidCube(1)
+                glPopMatrix()
 class Maze:
-    """Handles the logical generation of the maze and provides rendering data."""
     def __init__(self, width, height):
         self.width = width
         self.height = height
@@ -162,8 +561,6 @@ class Maze:
                         (cx + CELL_SIZE/2, cy + CELL_SIZE/2, cz + WALL_HEIGHT),
                     ])
         return walls
-        
-    
     def would_collide(self, x, y, radius):
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
@@ -185,7 +582,7 @@ class Maze:
                 dx_local = x - center_x
                 dy_local = y - center_y
                 half = CELL_SIZE / 2.0
-                pad = radius + (WALL_THICKNESS / 2.0) 
+                pad = radius + (WALL_THICKNESS / 2.0)
 
                 # Right wall at x = center_x + half
                 if cell['walls']['right']:
@@ -212,9 +609,6 @@ class Maze:
                         return True
 
         return False
-    
-    
-    
     
 
 def draw_floor():
@@ -268,6 +662,15 @@ def draw_walls(vertices):
     glPopMatrix()
     
     
+def keyboardListener(key, x, y):
+    keys[key.lower() if isinstance(key, bytes) else key.lower().encode()] = True
+
+def keyboardUpListener(key, x, y):
+    keys[key.lower() if isinstance(key, bytes) else key.lower().encode()] = False
+
+    if key == b'b' and player.gun:
+        create_bullets()
+
 
 def draw_start_exit_points():
     """Renders the starting and exit squares on the floor."""
@@ -311,9 +714,9 @@ def setupCamera():
         yaw_rad = math.radians(player.rotate)
         look_dir_x = math.sin(yaw_rad)
         look_dir_y = math.cos(yaw_rad)
-        eye_x = player.x - 5
+        eye_x = player.x -4
         eye_y = player.y
-        eye_z = head_height + 4
+        eye_z = head_height + 5
         look_at_offset = 100
         center_x = eye_x + look_dir_x * look_at_offset
         center_y = eye_y + look_dir_y * look_at_offset
@@ -366,48 +769,116 @@ def mouseListener(button, state, x, y):
 
 
 def showScreen():
-    global window_size_x, window_size_y, walls_to_draw, maze
+    global window_size_x, window_size_y, walls_to_draw, maze,items_manager
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
     glViewport(0, 0, window_size_x, window_size_y)
 
     setupCamera()
     draw_floor()
+    draw_traps() 
     draw_start_exit_points()
     draw_walls(walls_to_draw)
-
-    
+    draw_guns()
+    draw_bullet()
+    glColor3f(1, 1, 1)
+    draw_text(10, 770, f"LIFE: {LIFE}")
+    draw_text(10, 740, f"SPEED: {PLAYER_SPEED:.2f}")
+    draw_text(10, 710, f"DAMAGE: {DAMAGE}")
+    items_manager.draw()
+    player.draw()
     glutSwapBuffers()
 
 
 def idle_func():
-    global last_regen_time, walls_to_draw,player
+    global last_regen_time, walls_to_draw,player,items_manager,PLAYER_SPEED,DAMAGE,LIFE,RESTORE,game_over,freeze_end_time 
+    player.update()
+    items_manager.update() 
+    update_bullets() 
 
-    # Check for maze regeneration
     current_time = time.time()
     if current_time - last_regen_time >= MAZE_REGEN_INTERVAL_SECONDS:
         print("Generating new maze...")
         maze.generate()
         walls_to_draw = maze.get_walls_vertices()
         last_regen_time = current_time
+    px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
+    py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
+    if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
+        maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
         
-        
-        px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
-        py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
-        if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
-            maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
-        
+
+    if player.gun==False:
+        for g in GUNS:
+            if g["picked"]==False:
+                x,y=g["pos"]
+                dist = math.sqrt((player.x - x)**2 + (player.y - y)**2)
+                if dist<4:
+                    g["picked"]=True
+                    player.gun=True
+                    print("Player picked the GUN")
+                    break
+
+    for trap in TRAP:
+        if trap["active"]==False:
+            continue
+        else:
+            x,y=trap["pos"]
+            dist = math.sqrt((player.x -x)**2 + (player.y - y)**2)   
+            if dist<3:
+                trap['active'] = False       
+                print(f"Player hit a {trap["type"]} trap\n")
+                if trap["type"] == "damage":
+                    LIFE -= 20
+                    LIFE = max(LIFE, 0)
+                    print("player lost 20 life point")
+                if trap["type"] == "Freeze":
+                     PLAYER_SPEED = 0
+                     freeze_end_time = time.time() + 10   
+                     print("Player is frozen")
+                if freeze_end_time > 0 and time.time() > freeze_end_time:
+                        PLAYER_SPEED = 0.1 
+                        freeze_end_time = 0
+                if trap["type"]=="unpick":
+                    if player.gun:
+                        player.gun=False
+                        print("player dropped the gun")             
+    for item in items_manager.items:
+        if item['picked']:
+            continue
+        it_x,it_y=item['pos']
+        dist = math.sqrt((player.x -it_x)**2 + (player.y - it_y)**2)
+        if dist<1.5:
+            item['picked'] = True
+            if item['type']=='speed':
+                PLAYER_SPEED+=0.5
+                print("Speed increased:", PLAYER_SPEED)
+                PLAYER_SPEED = min(PLAYER_SPEED ,2)
+            elif item['type'] == "damage":
+                DAMAGE += 50
+                DAMGE= min(DAMAGE,100)
+                print("Damage increased:", DAMAGE)
+
+            elif item['type'] == "heal":
+                LIFE += 50
+                LIFE =min(LIFE,200)
+                print("Life increased:", LIFE)
+
+            elif item['type'] == "restore":
+                LIFE = RESTORE  
+                print("Life fully restored:", LIFE)    
+
+
     glutPostRedisplay()
 
 
 def main():
-    
-    global walls_to_draw, maze, last_regen_time,player
+    global walls_to_draw, maze, last_regen_time,player,gun_pos,items_manager
     glutInit()
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
     glutInitWindowSize(window_size_x, window_size_y)
     glutInitWindowPosition(500, 50)
-    glutCreateWindow(b"Great Escape")
+    glutCreateWindow(b"Great Escape") 
 
     glClearColor(*SKY_COLOR, 1.0)
 
@@ -418,14 +889,23 @@ def main():
     glutDisplayFunc(showScreen)
     glutSpecialFunc(specialKeyListener)
     glutMouseFunc(mouseListener)
-    
+    for i in range(4):
+        gun_pos = generate_gun(maze)
+        GUNS.append({'pos': (gun_pos), 'picked': False})
+    regen_guns()  
+    for trap in trap_type:
+        for i in range(3):  
+            TRAP.append(spawn_traps(maze, trap))
     glutIdleFunc(idle_func)
+    items_manager = Items(maze)
+    start_x = ((-MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE)
+    start_y = ((-MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE)
+    player = Player(start_x, start_y)
+    player.z = 0 
+    player.rotate = 0 
+    glutKeyboardFunc(keyboardListener)      
+    glutKeyboardUpFunc(keyboardUpListener)  
     glutMainLoop()
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
