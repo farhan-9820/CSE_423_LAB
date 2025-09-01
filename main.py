@@ -803,10 +803,10 @@ def idle_func():
         maze.generate()
         walls_to_draw = maze.get_walls_vertices()
         last_regen_time = current_time
-    px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
-    py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
-    if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
-        maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
+        px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
+        py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
+        if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
+            maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
         
 
     if player.gun==False:
