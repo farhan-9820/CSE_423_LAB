@@ -83,13 +83,268 @@ trap_type=[
 ]
 
 
+ENEMIES = []
+PROJECTILES = []
+ENEMY_MELEE = "melee"
+ENEMY_RANGED = "ranged"
+ENEMY_RADIUS = 0.9
+MELEE_SPEED = 0.06
+RANGED_SPEED = 0.045
+ENEMY_TURN_RATE = 2.0
+ENEMY_VISION_FOV = 60.0
+ENEMY_VISION_RANGE = 80.0
+MELEE_HIT_RANGE = 2.0
+MELEE_DAMAGE = 12
+RANGED_DAMAGE = 2
 
-####################### sakib ############################
+PROJECTILE_SPEED = 0.7
+PROJECTILE_BASE_RADIUS = 0.35
+PROJECTILE_GROWTH_PER_UNIT = 0.02
+
+def now():
+    return glutGet(GLUT_ELAPSED_TIME) / 1000.0
+
+def has_line_of_sight(maze, x0, y0, x1, y1, step=0.6):
+    dx = x1 - x0
+    dy = y1 - y0
+    dist = math.hypot(dx, dy)
+    if dist == 0:
+        return True
+    steps = int(dist / step)
+    for i in range(1, steps + 1):
+        px = x0 + dx * (i / steps)
+        py = y0 + dy * (i / steps)
+        if maze.would_collide(px, py, radius=0.08):
+            return False
+    return True
+
+class Projectile:
+    def __init__(self, x, y, dir_x, dir_y, kind='fire'):
+        self.x = x
+        self.y = y
+        self.z = 1.0
+        l = math.hypot(dir_x, dir_y) or 1.0
+        self.dx = dir_x / l
+        self.dy = dir_y / l
+        self.kind = kind
+        self.start_x = x
+        self.start_y = y
+        self.alive = True
+        self.color = (1.0, 0.2, 0.1) if kind == 'fire' else (0.2, 0.6, 1.0)
+
+    def traveled(self):
+        return math.hypot(self.x - self.start_x, self.y - self.start_y)
+
+    def radius(self):
+        return PROJECTILE_BASE_RADIUS + PROJECTILE_GROWTH_PER_UNIT * self.traveled()
+
+    def update(self, maze, player):
+        if not self.alive:
+            return
+        nx = self.x + self.dx * PROJECTILE_SPEED
+        ny = self.y + self.dy * PROJECTILE_SPEED
+        # collide with walls
+        if maze.would_collide(nx, ny, self.radius()):
+            self.alive = False
+            return
+        self.x, self.y = nx, ny
+        # collide with player
+        if player and math.hypot(player.x - self.x, player.y - self.y) <= (player.radius + self.radius()):
+            
+            try:
+                if self.kind == 'fire':
+                    # damage + burn
+                    if hasattr(player, 'apply_status'):
+                        player.apply_status('burn', duration=4)
+                    
+                else:
+                    if hasattr(player, 'apply_status'):
+                        player.apply_status('freeze', duration=2)
+            except Exception:
+                pass
+            
+            if hasattr(player, 'hp'):
+                player.hp = max(0, player.hp - (RANGED_DAMAGE if self.kind == 'fire' else max(1, RANGED_DAMAGE//2)))
+            else:
+                
+                try:
+                    from __main__ import LIFE
+                    if self.kind == 'fire':
+                        LIFE -= RANGED_DAMAGE
+                    else:
+                        LIFE -= max(1, RANGED_DAMAGE//2)
+                except Exception:
+                    pass
+            self.alive = False
+
+    def draw(self):
+        if not self.alive:
+            return
+        glPushMatrix()
+        glTranslatef(self.x, self.y, self.z)
+        glColor3fv(self.color)
+        glutSolidSphere(self.radius(), 12, 12)
+        glPopMatrix()
+
+class Enemy:
+    def __init__(self, x, y, etype='melee'):
+        self.x = x
+        self.y = y
+        self.z = 0.0
+        self.rotate = random.uniform(0, 360)
+        self.type = etype
+        self.radius = ENEMY_RADIUS
+        self.speed = MELEE_SPEED if etype == 'melee' else RANGED_SPEED
+        self._next_attack_time = 0.0
+        self.hp = 1   # enemy dies after 1 hit (tweakable)
+
+    def forward(self):
+        r = math.radians(self.rotate)
+        return math.sin(r), math.cos(r)
+
+    def face_towards(self, tx, ty, rate=ENEMY_TURN_RATE):
+        desired = math.degrees(math.atan2(tx - self.x, ty - self.y))
+        diff = (desired - self.rotate + 180) % 360 - 180
+        if diff > rate: diff = rate
+        if diff < -rate: diff = -rate
+        self.rotate = (self.rotate + diff) % 360
+
+    def patrol_move(self, maze):
+        fx, fy = self.forward()
+        nx = self.x + fx * self.speed
+        ny = self.y + fy * self.speed
+        moved = False
+        if not maze.would_collide(nx, self.y, self.radius):
+            self.x = nx
+            moved = True
+        else:
+            self.rotate += ENEMY_TURN_RATE * 2
+        if not maze.would_collide(self.x, ny, self.radius):
+            self.y = ny
+            moved = True
+        else:
+            self.rotate += ENEMY_TURN_RATE * 2
+        if not moved:
+            self.rotate += random.choice([-30, 30, 60, -60])
+
+    def can_see_player(self, maze, player):
+        if not player:
+            return False
+        dx = player.x - self.x
+        dy = player.y - self.y
+        dist = math.hypot(dx, dy)
+        if dist > ENEMY_VISION_RANGE:
+            return False
+        facing = math.degrees(math.atan2(dx, dy)) % 360
+        diff = abs(((facing - self.rotate + 180) % 360) - 180)
+        if diff > ENEMY_VISION_FOV * 0.5:
+            return False
+        
+        return has_line_of_sight(maze, self.x, self.y, player.x, player.y)
+
+    def try_attack(self, maze, player):
+        t = now()
+        if t < self._next_attack_time: return
+        if self.type == 'melee':
+            if player and math.hypot(player.x - self.x, player.y - self.y) <= MELEE_HIT_RANGE:
+                # melee hit -> apply status on player if function exists
+                if hasattr(player, 'apply_status'):
+                    # choose poison or bleed (no stacking inside apply_status)
+                    if random.random() < 0.5:
+                        player.apply_status('poison', duration=4.0)
+                    else:
+                        player.apply_status('bleed', duration=3.0)
+                # fallback global damage
+                try:
+                    from __main__ import LIFE
+                    LIFE -= MELEE_DAMAGE
+                except Exception:
+                    pass
+                self._next_attack_time = t + 1.0
+        else:
+            # ranged: shoot a projectile if has LOS
+            if self.can_see_player(maze, player):
+                dx = player.x - self.x
+                dy = player.y - self.y
+                kind = 'fire' if random.random() < 0.6 else 'ice'
+                PROJECTILES.append(Projectile(self.x, self.y, dx, dy, kind=kind))
+                self._next_attack_time = t + 1.2
+
+    def update(self, maze, player):
+        if self.can_see_player(maze, player):
+            self.face_towards(player.x, player.y)
+            fx, fy = self.forward()
+            step = self.speed * 0.9
+            nx = self.x + fx * step
+            ny = self.y + fy * step
+            if not maze.would_collide(nx, self.y, self.radius): self.x = nx
+            if not maze.would_collide(self.x, ny, self.radius): self.y = ny
+            self.try_attack(maze, player)
+        else:
+            self.patrol_move(maze)
+
+    def draw(self):
+        glPushMatrix()
+        glTranslatef(self.x, self.y, self.z)
+        glRotatef(self.rotate, 0, 0, 1)
+        scale = 1.2
+        if self.type == ENEMY_MELEE:
+            glColor3f(0.2, 0.7, 0.2)
+        else:
+            glColor3f(0.9, 0.9, 0.2)
+        glutSolidCube(scale)
+        # head
+        glPushMatrix()
+        glTranslatef(0, 0, scale*0.9)
+        glColor3f(0.1, 0.1, 0.1)
+        glutSolidSphere(scale*0.32, 10, 10)
+        glPopMatrix()
+        # ranged indicator: small triangle on head
+        if self.type == ENEMY_RANGED:
+            glPushMatrix()
+            glTranslatef(0,0,scale*1.5)
+            glRotatef(-90,1,0,0)
+            glColor3f(0.8,0.2,0.2)
+            glutSolidCone(scale*0.18, scale*0.25, 8, 1)
+            glPopMatrix()
+        glPopMatrix()
+
+# spawn helper: requires a maze instance
+def random_open_pos(maze, offset=6.0):
+    for _ in range(200):
+        cx = random.randint(0, maze.width - 1)
+        cy = random.randint(0, maze.height - 1)
+        cell = maze.grid[cx][cy]
+        if all(cell['walls'].values()):
+            continue
+        x = (cx - maze.width / 2) * (maze.width > 0 and maze.width or 1) * 0 + (cx - maze.width / 2) * 10 + 5
+        
+        try:
+            from __main__ import CELL_SIZE, MAZE_WIDTH, MAZE_HEIGHT
+            x = (cx - MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE/2
+            y = (cy - MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE/2
+            if cell['walls']['left']:  x += offset
+            if cell['walls']['right']: x -= offset
+            if cell['walls']['up']:    y -= offset
+            if cell['walls']['down']:  y += offset
+            if not maze.would_collide(x, y, ENEMY_RADIUS):
+                return x, y
+        except Exception:
+            # fallback simple placement
+            y = (cy - maze.height / 2) * 10 + 5
+            if not maze.would_collide(x, y, ENEMY_RADIUS):
+                return x, y
+    # fallback center
+    return 0.0, 0.0
+
+def spawn_enemies(maze, count=6):
+    ENEMIES.clear()
+    for i in range(count):
+        etype = ENEMY_MELEE if random.random() < 0.6 else ENEMY_RANGED
+        x,y = random_open_pos(maze, offset=6.0)
+        ENEMIES.append(Enemy(x,y,etype))
 
 
-
-
-####################################################################################
 
 
 
@@ -114,7 +369,6 @@ class Player:
         self.speed_modifier = 1.0
         self.radius = 1.0
         self.gun=False
-        
         
         self.status = None
         self.status_timer = 0.0
@@ -1141,11 +1395,28 @@ def idle_func():
     player.update()
     items_manager.update() 
     update_bullets() 
-    
-    
-
-#------------sakib---------------
-#---------insert here------------
+    #---------------------sakib
+    #  Bullet vs Enemy collision
+    for bullet in BULLETS[:]:
+        if not bullet[2]:
+            continue
+        bx, by, bz = bullet[0]
+        for enemy in ENEMIES[:]:
+            dist = math.hypot(bx - enemy.x, by - enemy.y)
+            if dist <= (0.5 + enemy.radius):  # 0.5 ~ bullet size
+                enemy.hp -= 1
+                if enemy.hp <= 0:
+                    ENEMIES.remove(enemy)
+                bullet[2] = False  # deactivate bullet
+                break
+    # update enemies
+    for e in ENEMIES:
+        e.update(maze, player)
+    # update projectiles
+    for p in PROJECTILES:
+        p.update(maze, player)
+    # remove dead projectiles
+    PROJECTILES[:] = [p for p in PROJECTILES if p.alive]
     
     
     
@@ -1291,7 +1562,7 @@ def idle_func():
                 PLAYER_SPEED = min(PLAYER_SPEED ,0.5)
             elif item['type'] == "damage":
                 DAMAGE += 50
-                DAMGE= min(DAMAGE,100)
+                DAMAGE= min(DAMAGE,100)
                 print("Damage increased:", DAMAGE)
 
             elif item['type'] == "heal":
