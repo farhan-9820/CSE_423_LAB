@@ -1,6 +1,7 @@
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
+from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_18
 import random
 import time
 import math
@@ -827,7 +828,7 @@ def idle_func():
             dist = math.sqrt((player.x -x)**2 + (player.y - y)**2)   
             if dist<3:
                 trap['active'] = False       
-                print(f"Player hit a {trap["type"]} trap\n")
+                print(f"Player hit a {trap['type']} trap\n")
                 if trap["type"] == "damage":
                     LIFE -= 20
                     LIFE = max(LIFE, 0)
