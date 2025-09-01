@@ -19,8 +19,8 @@ Enemies can impose conditions on the player during combat, such as **paralysis**
 ## 6. Player Item Pickup (Guns)  
 The player can acquire weapons (e.g., guns) scattered throughout the maze. These items provide ranged attack capabilities, offering tactical advantages against both melee and ranged enemies.  
 
-## 7. Bridges and Towers  
-Certain sections of the maze are connected through **bridges or towers**, enabling players to access otherwise unreachable map locations or hidden parts of the labyrinth.  
+## 7. Traps
+Three kinds of traps --> unpick, freeze, life drain
 
 ## 8. Magic Item Pickups  
 Collectible magic items grant temporary or permanent **buffs**, such as **health restoration**, **increased attack power**, or **reduced attack strength** (if cursed). These pickups add depth to exploration and reward discovery.  
@@ -65,4 +65,5 @@ At the end of the maze, the player must complete a **quiz**.
 
 ## 20. Game Restart or Pause  
 Core functionality includes the ability to **pause gameplay** or **restart the maze**, allowing players to reset progress or regroup after failure.  
+
 
