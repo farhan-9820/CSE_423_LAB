@@ -1,7 +1,9 @@
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
+from OpenGL.GLUT import GLUT_BITMAP_TIMES_ROMAN_24
 from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_18
+import sys
 import random
 import time
 import math
@@ -28,6 +30,8 @@ guardian = None
 last_regen_time = 0
 walls_to_draw = []
 
+game_over_time = None
+game_won = False 
 
 HEAL=0
 SPEED=0
@@ -43,17 +47,20 @@ fovY = 90
 keys = {}
 items_manager=None
 
+cheat_mode = False
+cheat_start_time = 0
+CHEAT_DURATION = 15
 
-
-PLAYER_SPEED = 0.3                       #max speed = 0.6 
+PLAYER_SPEED = 0.05                   #max speed = 0.6 
 PLAYER_RADIUS = 0.5
 PUNISHMENT_SPEED_MODIFIER = 0.5 
 
-
+last_gun_regen_time = 0
+last_item_regen_time = 0
 freeze_end_time =0
 MAZE_WIDTH = 10
 MAZE_HEIGHT = 10
-CELL_SIZE = 10.0  # Size of a single maze cell
+CELL_SIZE = 10.0  # size of a single maze cell
 WALL_HEIGHT = 4.0
 WALL_THICKNESS = 0.2
 WALL_COLOR = (0.5, 0.5, 0.5)
@@ -62,8 +69,8 @@ FLOOR_COLOR = (0.2, 0.2, 0.2)
 START_COLOR = (0.0, 1.0, 0.0)
 EXIT_COLOR = (1.0, 0.0, 0.0)
 
-# Dynamic maze settings
-MAZE_REGEN_INTERVAL_SECONDS = 5.0
+
+MAZE_REGEN_INTERVAL_SECONDS = 30.0
 last_regen_time = 0
 
 
@@ -74,6 +81,17 @@ trap_type=[
    ("Unpick",(0.6, 1.0, 0.6))
 
 ]
+
+
+
+####################### sakib ############################
+
+
+
+
+####################################################################################
+
+
 
 def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
     glColor3f(1, 1, 1)  
@@ -96,12 +114,20 @@ class Player:
         self.speed_modifier = 1.0
         self.radius = 1.0
         self.gun=False
+        
+        
+        self.status = None
+        self.status_timer = 0.0
+        self.can_move = True
+        self.burn_damage = 0.0
     
     
     def take_damage(self, damage):
+        global game_state
         self.health -= damage
         if self.health <= 0:
             self.health = 0
+            game_state = "game_over"  # set game_state to "game_over"
             return True
         return False
     
@@ -112,17 +138,21 @@ class Player:
         self.speed_modifier = 1.0
         self.can_one_shot = True
     
-    
-    
-    
+
     
     def update(self):
-        global maze, game_state,camera_mode
+        global maze, game_state,camera_mode,cheat_mode
         if game_state == "talking":
             return
+        
+        self.update_status()
+            # Block movement if frozen
+        if not self.can_move:
+                self.update_status()
+                return
 
         speed = PLAYER_SPEED * self.speed_modifier
-        rotate_speed = 2.0
+        rotate_speed = 1.0
         yaw_rad = math.radians(self.rotate)
         if camera_mode == "orbit":
             fwd_x = math.cos(yaw_rad)
@@ -151,16 +181,21 @@ class Player:
             if b'a' in keys and keys[b'a']:
                 self.rotate = (self.rotate - rotate_speed)
 
-        # Resolve collisions
+        # resolve collisions
         proposed_x = self.x + move_dx
-        if maze is not None and not maze.would_collide(proposed_x, self.y, PLAYER_RADIUS):
-            self.x = proposed_x
-
         proposed_y = self.y + move_dy
-        if maze is not None and not maze.would_collide(self.x, proposed_y, PLAYER_RADIUS):
-            self.y = proposed_y
+        if cheat_mode:
+            self.x=proposed_x
+            self.y=proposed_y
+        else:    
+            if maze is not None and not maze.would_collide(proposed_x, self.y, PLAYER_RADIUS):
+                self.x = proposed_x
 
-        # Clamp to maze bounds
+            proposed_y = self.y + move_dy
+            if maze is not None and not maze.would_collide(self.x, proposed_y, PLAYER_RADIUS):
+                self.y = proposed_y
+
+        # clamp to maze bounds
         half_maze_x = (MAZE_WIDTH * CELL_SIZE) / 2
         half_maze_y = (MAZE_HEIGHT * CELL_SIZE) / 2
         self.x = max(-half_maze_x, min(self.x, half_maze_x))
@@ -222,19 +257,6 @@ class Player:
             gluCylinder(self.quadric, hand_radius, hand_radius, hand_len, 10, 2)
             glPopMatrix()
 
-            # Gun attached to player
-            glPushMatrix()
-            gun_length = scale * 2.0        
-            gun_thickness = scale * 0.25    
-            chest_z = scale * 1
-            forward_offset = scale + gun_length * 0.5  
-            glTranslatef(0.0, forward_offset, chest_z)
-            glScalef(gun_thickness, gun_length, gun_thickness)
-            glColor3f(0.8, 0.8, 0.1)
-            glutSolidCube(1.0)
-            glPopMatrix()
-
-
 
             if self.gun:
                 glPushMatrix()
@@ -256,10 +278,39 @@ class Player:
 
             glPopMatrix() 
             
-            
-            
-            
-            
+    def apply_status(self, status, duration=3.0):
+        """Apply a status effect. Effects don't stack (if already active, ignored)."""
+        if self.status is not None:
+            return
+        self.status = status
+        self.status_timer = float(duration)
+        if status == "freeze":
+            self.can_move = False
+        elif status == "burn":
+            self.burn_damage = 2.0
+
+    def update_status(self):
+        """Tick status effects each frame. Uses global LIFE to keep consistent with other code."""
+        global LIFE
+        if self.status_timer > 0.0:
+            # reduce timer (assume ~60 FPS)
+            self.status_timer -= 1.0 / 60.0
+            if self.status == "burn":
+                LIFE -= self.burn_damage * 0.1
+            elif self.status == "poison":
+                LIFE -= 0.05
+            elif self.status == "bleed":
+                LIFE -= 0.1
+
+            # clamp life
+            if LIFE < 0:
+                LIFE = 0
+        else:
+            # effect ended
+            if self.status == "freeze":
+                self.can_move = True
+            self.status = None
+            self.status_timer = 0.0
 
 
 class Guardian:
@@ -276,7 +327,10 @@ class Guardian:
         self.questions = [
             {"q": "Is the sky blue? (y/n)", "a": b"y"},
             {"q": "Is the Earth flat? (y/n)", "a": b"n"},
-            {"q": "Is this a difficult maze? (y/n)", "a": b"y"}
+            {"q": "Is this a difficult maze? (y/n)", "a": b"y"},
+            {"q": "Do you lie in real life? (y/n)", "a": b"y"},
+            {"q": "Does the moon revolve around the earth? (y/n)", "a": b"y"},
+            {"q": "Do you think you can escape this maze? (y/n)", "a": b"y"}
         ]
         self.current_question_index = 0
         self.chase_speed = 0.1
@@ -326,20 +380,15 @@ class Guardian:
         gluSphere(gluNewQuadric(), scale / 2.5, 10, 10)
         glPopMatrix()
 
-        # Left leg
-        glPushMatrix()
-        glTranslatef(-scale / 4, 0, 0)
-        glColor3f(0, 0, 1)
-        gluCylinder(gluNewQuadric(), scale / 5, scale / 3, scale / 2, 10, 10)           #argNames=('quad', 'base', 'top', 'height', 'slices', 'stacks')
-        glPopMatrix()
 
-        # Right leg
+        # Sphere at the end of the leg
+        glColor3f(0.8, 1, 0.8)
         glPushMatrix()
-        glTranslatef(scale / 4, 0, 0)
-        glColor3f(0, 0, 1)
-        gluCylinder(gluNewQuadric(), scale / 5, scale / 3, scale / 2, 10, 10)
+        glTranslatef(-2, 0, 0)
+        glutSolidSphere(1.5, 20, 20) # Draw a sphere for the foot
         glPopMatrix()
         
+                
         # Left hand
         glPushMatrix()
         glTranslatef(0, -scale / 2, scale) # Position at the side of the body
@@ -360,37 +409,27 @@ class Guardian:
 
         if self.conversation_active:
             question = self.questions[self.current_question_index]["q"]
-            draw_3d_text(question, self.x, self.y, self.z + 5)
+            draw_3d_text(question, self.x, self.y, self.z + 7)
 
 def draw_3d_text(text, x, y, z):
     """Renders 3D text using GLUT strokes."""
     glRasterPos3f(x, y, z)
     glColor3f(1, 1, 1) # White text
     for char in text:
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(char))
+        glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, ord(char))
 
 
-
-
-
-
-
-
-
-
-            
-            
-            
-            
-            
-            
 def regen_guns(value=0):
-    global GUNS, maze
-    GUNS.clear()
-    for _ in range(4): 
-        gun_pos = generate_gun(maze, offset=15)
-        GUNS.append({'pos': gun_pos, 'picked': False})
-    glutTimerFunc(30000, regen_guns, 0)
+    global GUNS, maze,last_gun_regen_time
+    now = time.time()
+    force=False
+    if force or (now - last_gun_regen_time >= 30.0):
+        GUNS.clear()
+        for i in range(4):
+            gun_pos = generate_gun(maze, offset=15)
+            GUNS.append({'pos': gun_pos, 'picked': False})
+        last_gun_regen_time = now
+
 
 def generate_gun(maze, offset=15):
     while True:
@@ -419,9 +458,6 @@ def generate_gun(maze, offset=15):
         cell_center_y = max(-half_maze_y, min(cell_center_y, half_maze_y))
 
         return (cell_center_x, cell_center_y)
-
-
-
 
 
 def spawn_traps(maze,trap):
@@ -570,80 +606,85 @@ def update_bullets():
 
 
 class Items:
-    def __init__(self,maze, regen_interval=15000, offset=15):
+    def __init__(self, maze, regen_interval=15, offset=15):
         self.maze = maze
-        self.regen_interval = regen_interval
-        self.offset = offset   
+        self.regen_interval = regen_interval   # seconds instead of ms
+        self.offset = offset
         self.items = []
         self.item_types = ["heal", "damage", "speed", "restore"]
-        self.generate_items()        
-        glutTimerFunc(self.regen_interval, self.regen_items, 0)
+        self.last_regen_time = time.time()     
+        self.generate_items()
+
     def generate_item_at_random_cell(self, item_type):
-            while True:
-                cx = random.randint(0, self.maze.width - 1)
-                cy = random.randint(0, self.maze.height - 1)
-                cell = self.maze.grid[cx][cy]
+        while True:
+            cx = random.randint(0, self.maze.width - 1)
+            cy = random.randint(0, self.maze.height - 1)
+            cell = self.maze.grid[cx][cy]
 
-                if all(cell['walls'].values()):
-                    continue  
+            if all(cell['walls'].values()):
+                continue  
 
-                cell_center_x = (cx - self.maze.width / 2) * CELL_SIZE + CELL_SIZE / 2
-                cell_center_y = (cy - self.maze.height / 2) * CELL_SIZE + CELL_SIZE / 2
+            cell_center_x = (cx - self.maze.width / 2) * CELL_SIZE + CELL_SIZE / 2
+            cell_center_y = (cy - self.maze.height / 2) * CELL_SIZE + CELL_SIZE / 2
 
-                if cell['walls']['left']:
-                    cell_center_x += self.offset
-                if cell['walls']['right']:
-                    cell_center_x -= self.offset
-                if cell['walls']['up']:
-                    cell_center_y -= self.offset
-                if cell['walls']['down']:
-                    cell_center_y += self.offset
+            if cell['walls']['left']:
+                cell_center_x += self.offset
+            if cell['walls']['right']:
+                cell_center_x -= self.offset
+            if cell['walls']['up']:
+                cell_center_y -= self.offset
+            if cell['walls']['down']:
+                cell_center_y += self.offset
 
-                half_maze_x = (self.maze.width * CELL_SIZE) / 2 - self.offset
-                half_maze_y = (self.maze.height * CELL_SIZE) / 2 - self.offset
-                cell_center_x = max(-half_maze_x, min(cell_center_x, half_maze_x))
-                cell_center_y = max(-half_maze_y, min(cell_center_y, half_maze_y))
+            half_maze_x = (self.maze.width * CELL_SIZE) / 2 - self.offset
+            half_maze_y = (self.maze.height * CELL_SIZE) / 2 - self.offset
+            cell_center_x = max(-half_maze_x, min(cell_center_x, half_maze_x))
+            cell_center_y = max(-half_maze_y, min(cell_center_y, half_maze_y))
 
-                color = {
-                    "heal": (0.0, 1.0, 0.0),
-                    "damage": (1.0, 0.0, 0.0),
-                    "speed": (0.0, 0.0, 1.0),
-                    "restore": (1.0, 1.0, 0.0)
-                }[item_type]
+            color = {
+                "heal": (0.0, 1.0, 0.0),
+                "damage": (1.0, 0.0, 0.0),
+                "speed": (0.0, 0.0, 1.0),
+                "restore": (1.0, 1.0, 0.0)
+            }[item_type]
 
-                return {
-                    "pos": (cell_center_x, cell_center_y),
-                    "type": item_type,
-                    "color": color,
-                    "picked": False,
-                    "float_offset": 0.0
-                }
+            return {
+                "pos": (cell_center_x, cell_center_y),
+                "type": item_type,
+                "color": color,
+                "picked": False,
+                "float_offset": 0.0
+            }
 
     def generate_items(self):
-            self.items.clear()
-            for item_type in self.item_types:
-                for i in range(2):
-                    self.items.append(self.generate_item_at_random_cell(item_type))
-
-    def regen_items(self, value=0):
-            self.generate_items()
-            glutTimerFunc(self.regen_interval, self.regen_items, 0)
+        self.items.clear()
+        for item_type in self.item_types:
+            for i in range(2):
+                self.items.append(self.generate_item_at_random_cell(item_type))
 
     def update(self):
-            for item in self.items:
-                item['float_offset'] = math.sin(glutGet(GLUT_ELAPSED_TIME) * 0.003) * 0.2
+        for item in self.items:
+            item['float_offset'] = math.sin(glutGet(GLUT_ELAPSED_TIME) * 0.003) * 0.2
+
+        now = time.time()
+        if now - self.last_regen_time >= self.regen_interval:
+            self.generate_items()
+            self.last_regen_time = now
 
     def draw(self):
-            for item in self.items:
-                if item['picked']:
-                    continue
-                x, y = item['pos']
-                z = 0.5 + item['float_offset']
-                glPushMatrix()
-                glTranslatef(x, y, z)
-                glColor3fv(item['color'])
-                glutSolidCube(1)
-                glPopMatrix()
+        for item in self.items:
+            if item['picked']:
+                continue
+            x, y = item['pos']
+            z = 0.5 + item['float_offset']
+            glPushMatrix()
+            glTranslatef(x, y, z)
+            glColor3fv(item['color'])
+            glutSolidCube(1)
+            glPopMatrix()
+
+
+
 class Maze:
     """Handles the logical generation of the maze and provides rendering data."""
     def __init__(self, width, height):
@@ -831,8 +872,12 @@ def draw_walls(vertices):
     
     
 def keyboardListener(key, x, y):
-    global keys, game_state, guardian, player
+    global keys, game_state, guardian, player,cheat_mode, cheat_start_time
     keys[key.lower() if isinstance(key, bytes) else key.lower().encode()] = True
+    if key.lower() == b'c':
+        cheat_mode = True
+        cheat_start_time = time.time()
+        print("Cheat mode activated! You can pass through walls for 15 seconds.")
     
     if game_state == "talking":
         if key.lower() == b'y':
@@ -856,6 +901,12 @@ def keyboardListener(key, x, y):
 
     elif key.lower() == b'\x1b':
         glutLeaveMainLoop()
+    
+    
+    keys[key.decode('ascii').lower()] = True
+     
+    if key == b'r' and game_state == "game_over":
+        restart_game()
 
 def keyboardUpListener(key, x, y):
     global keys
@@ -910,10 +961,10 @@ def draw_start_exit_points():
     start_y = (-MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE
     glColor3fv(START_COLOR)
     glBegin(GL_QUADS)
-    glVertex3f(start_x - CELL_SIZE/2, start_y - CELL_SIZE/2, 0)
-    glVertex3f(start_x + CELL_SIZE/2, start_y - CELL_SIZE/2, 0)
-    glVertex3f(start_x + CELL_SIZE/2, start_y + CELL_SIZE/2, 0)
-    glVertex3f(start_x - CELL_SIZE/2, start_y + CELL_SIZE/2, 0)
+    glVertex3f(start_x - CELL_SIZE/2, start_y - CELL_SIZE/2, 0.1)
+    glVertex3f(start_x + CELL_SIZE/2, start_y - CELL_SIZE/2, 0.1)
+    glVertex3f(start_x + CELL_SIZE/2, start_y + CELL_SIZE/2, 0.1)
+    glVertex3f(start_x - CELL_SIZE/2, start_y + CELL_SIZE/2, 0.1)
     glEnd()
 
     # Draw the exit point
@@ -921,10 +972,10 @@ def draw_start_exit_points():
     exit_z = (MAZE_HEIGHT / 2) * CELL_SIZE - CELL_SIZE
     glColor3fv(EXIT_COLOR)
     glBegin(GL_QUADS)
-    glVertex3f(exit_x - CELL_SIZE/2,  exit_z - CELL_SIZE/2, 0)
-    glVertex3f(exit_x + CELL_SIZE/2,  exit_z - CELL_SIZE/2, 0)
-    glVertex3f(exit_x + CELL_SIZE/2,  exit_z + CELL_SIZE/2, 0)
-    glVertex3f(exit_x - CELL_SIZE/2,  exit_z + CELL_SIZE/2, 0)
+    glVertex3f(exit_x - CELL_SIZE/2,  exit_z - CELL_SIZE/2, 0.1)
+    glVertex3f(exit_x + CELL_SIZE/2,  exit_z - CELL_SIZE/2, 0.1)
+    glVertex3f(exit_x + CELL_SIZE/2,  exit_z + CELL_SIZE/2, 0.1)
+    glVertex3f(exit_x - CELL_SIZE/2,  exit_z + CELL_SIZE/2, 0.1)
     glEnd()
     
     glPopMatrix()
@@ -990,11 +1041,51 @@ def specialKeyListener(key, x, y):
 def mouseListener(button, state, x, y):
     global camera_mode
     if button == GLUT_RIGHT_BUTTON and state == GLUT_DOWN:
-        # Toggle camera mode between orbit and player-head view
         camera_mode = 'player' if camera_mode == 'orbit' else 'orbit'
         glutPostRedisplay()
 
 
+def restart_game():
+    global maze, walls_to_draw, last_regen_time, player, GUNS, TRAP, BULLETS, game_state, guardian
+    
+    # reset game state
+    game_state = "exploring"
+
+    # reset player
+    player.reset()
+    
+    # regenerate the maze
+    maze = Maze(MAZE_WIDTH, MAZE_HEIGHT)
+    maze.generate()
+    walls_to_draw = maze.get_walls_vertices()
+    
+    # clear the players starting cell from walls
+    px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
+    py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
+    if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
+        maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
+
+    # reset the guardian to its original spawn point
+    exit_x = (MAZE_WIDTH / 2) * CELL_SIZE - CELL_SIZE
+    exit_y = (MAZE_HEIGHT / 2) * CELL_SIZE - CELL_SIZE
+    guardian = Guardian(exit_x, exit_y, 0)
+    
+    # clear and respawn other game elements
+    GUNS.clear()
+    TRAP.clear()
+    BULLETS.clear()
+
+    #revert the game elem to og 
+    for i in range(4):
+        gun_pos = generate_gun(maze)
+        GUNS.append({'pos': (gun_pos), 'picked': False})
+    
+    for trap in trap_type:
+        for i in range(3):
+            TRAP.append(spawn_traps(maze, trap))
+            
+    last_regen_time = time.time()
+    
 
 
 def showScreen():
@@ -1015,6 +1106,13 @@ def showScreen():
     draw_text(10, 740, f"SPEED: {PLAYER_SPEED:.2f}")
     draw_text(10, 710, f"DAMAGE: {DAMAGE}")
     items_manager.draw()
+    
+    for e in ENEMIES:
+        e.draw()
+    # draw projectiles
+    for p in PROJECTILES:
+        p.draw()
+        
     player.draw()
     guardian.draw()
     
@@ -1038,8 +1136,44 @@ def showScreen():
 
 
 def idle_func():
-    global last_regen_time, walls_to_draw,player,items_manager,PLAYER_SPEED,DAMAGE,LIFE,RESTORE,game_over,freeze_end_time, guardian,game_state 
+    global last_regen_time, walls_to_draw,player,items_manager,PLAYER_SPEED,DAMAGE,LIFE,RESTORE,game_over,freeze_end_time, guardian,game_state ,cheat_start_time,cheat_mode, game_won, game_over_time
     
+    player.update()
+    items_manager.update() 
+    update_bullets() 
+    
+    
+
+#------------sakib---------------
+#---------insert here------------
+    
+    
+    
+    
+
+    
+    exit_x = (MAZE_WIDTH / 2) * CELL_SIZE - CELL_SIZE
+    exit_y = (MAZE_HEIGHT / 2) * CELL_SIZE - CELL_SIZE
+    if not game_won:
+        distance_to_exit = math.sqrt((player.x - exit_x)**2 + (player.y - exit_y)**2)
+        if distance_to_exit < PLAYER_RADIUS + 2:  
+            game_won = True
+            game_state = "game_won"
+            game_over_time = time.time()
+            print("You have completed the game!")
+
+    # If the game is won, check the delay
+    if game_won:
+        if time.time() - game_over_time >= 5:
+            glutLeaveMainLoop()
+        else:
+            glutPostRedisplay()
+            return 
+    
+    if game_state == "game_over":
+        # Game is over, stop all updates
+        glutPostRedisplay()
+        return
     
     
     if game_state != "game_over":
@@ -1066,8 +1200,45 @@ def idle_func():
     
         px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
         py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
+        
+        
+        
         if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
                 maze.grid[px][py]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
+                
+                # symmetrically open adjacent cells corresponding walls
+                # Up neighbor
+                if py + 1 < MAZE_HEIGHT:
+                    maze.grid[px][py + 1]['walls']['down'] = False
+                # Down neighbor
+                if py - 1 >= 0:
+                    maze.grid[px][py - 1]['walls']['up'] = False
+                # Left neighbor
+                if px - 1 >= 0:
+                    maze.grid[px - 1][py]['walls']['right'] = False
+                # Right neighbor
+                if px + 1 < MAZE_WIDTH:
+                    maze.grid[px + 1][py]['walls']['left'] = False
+                
+                # player.x = (px - MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE / 2
+                # player.y = (py - MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE / 2
+                
+                # update walls_to_draw after modifications
+                walls_to_draw = maze.get_walls_vertices()
+        
+        # px = int((player.x / CELL_SIZE) + (MAZE_WIDTH / 2))
+        # py = int((player.y / CELL_SIZE) + (MAZE_HEIGHT / 2))
+        # if 0 <= px < MAZE_WIDTH and 0 <= py < MAZE_HEIGHT:
+        #     # Open all walls in a 3x3 area
+        #     for dx in [-1, 0, 1]:
+        #         for dy in [-1, 0, 1]:
+        #             nx = px + dx
+        #             ny = py + dy
+        #             if 0 <= nx < MAZE_WIDTH and 0 <= ny < MAZE_HEIGHT:
+        #                 maze.grid[nx][ny]['walls'] = {'up': False, 'down': False, 'left': False, 'right': False}
+        #     player.x = (px - MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE / 2
+        #     player.y = (py - MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE / 2
+        #     walls_to_draw = maze.get_walls_vertices()
 
     if player.gun==False:
         for g in GUNS:
@@ -1079,14 +1250,17 @@ def idle_func():
                     player.gun=True
                     print("Player picked the GUN")
                     break
-
+    if freeze_end_time > 0 and time.time() > freeze_end_time:
+            PLAYER_SPEED = 0.1 # restore normal speed
+            freeze_end_time = 0
+            print("Player unfrozen!")
     for trap in TRAP:
         if trap["active"]==False:
             continue
         else:
             x,y=trap["pos"]
             dist = math.sqrt((player.x -x)**2 + (player.y - y)**2)   
-            if dist<1.5:
+            if dist<=3:
                 trap['active'] = False       
                 print(f"Player hit a {trap['type']} trap\n")
                 if trap["type"] == "damage":
@@ -1097,13 +1271,13 @@ def idle_func():
                      PLAYER_SPEED = 0
                      freeze_end_time = time.time() + 10   
                      print("Player is frozen")
-                if freeze_end_time > 0 and time.time() > freeze_end_time:
-                        PLAYER_SPEED = 0.1 
-                        freeze_end_time = 0
-                if trap["type"]=="unpick":
+    
+                if trap["type"]=="Unpick":
                     if player.gun:
                         player.gun=False
-                        print("player dropped the gun")             
+                        print("player dropped the gun")
+                        
+                                     
     for item in items_manager.items:
         if item['picked']:
             continue
@@ -1112,9 +1286,9 @@ def idle_func():
         if dist<1.5:
             item['picked'] = True
             if item['type']=='speed':
-                PLAYER_SPEED+=0.5
+                PLAYER_SPEED+=0.1
                 print("Speed increased:", PLAYER_SPEED)
-                PLAYER_SPEED = min(PLAYER_SPEED ,2)
+                PLAYER_SPEED = min(PLAYER_SPEED ,0.5)
             elif item['type'] == "damage":
                 DAMAGE += 50
                 DAMGE= min(DAMAGE,100)
@@ -1129,7 +1303,13 @@ def idle_func():
                 LIFE = RESTORE  
                 print("Life fully restored:", LIFE)    
 
-
+    if cheat_mode:
+        elapsed = time.time() - cheat_start_time
+        if elapsed >= 10.0:   
+            cheat_mode = False
+            print("Cheat mode deactivated!")
+    regen_guns()
+    items_manager.update()
     glutPostRedisplay()
 
 
@@ -1141,6 +1321,7 @@ def main():
     glutInitWindowPosition(500, 50)
     glutCreateWindow(b"Great Escape") 
     glClearColor(*SKY_COLOR, 1.0)
+    glEnable(GL_DEPTH_TEST)
 
     maze = Maze(MAZE_WIDTH, MAZE_HEIGHT)
     maze.generate()
@@ -1154,6 +1335,9 @@ def main():
     exit_y = (MAZE_HEIGHT / 2) * CELL_SIZE - CELL_SIZE
     guardian = Guardian(exit_x, exit_y, 0)
     
+    spawn_enemies(maze, count=8)   # choose count as you like
+    for e in ENEMIES: print("ENEMY", e.type, e.x, e.y)
+    
     glutDisplayFunc(showScreen)
     glutSpecialFunc(specialKeyListener)
     glutMouseFunc(mouseListener)
@@ -1166,11 +1350,6 @@ def main():
             TRAP.append(spawn_traps(maze, trap))
     glutIdleFunc(idle_func)
     items_manager = Items(maze)
-    
-    # start_x = ((-MAZE_WIDTH / 2) * CELL_SIZE + CELL_SIZE)
-    # start_y = ((-MAZE_HEIGHT / 2) * CELL_SIZE + CELL_SIZE)
-    # player = Player(start_x, start_y)
-    # player.rotate = 0 
     
     glutKeyboardFunc(keyboardListener)      
     glutKeyboardUpFunc(keyboardUpListener)  
