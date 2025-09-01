@@ -58,8 +58,8 @@ PUNISHMENT_SPEED_MODIFIER = 0.5
 last_gun_regen_time = 0
 last_item_regen_time = 0
 freeze_end_time =0
-MAZE_WIDTH = 10
-MAZE_HEIGHT = 10
+MAZE_WIDTH = 20
+MAZE_HEIGHT = 20
 CELL_SIZE = 10.0  # size of a single maze cell
 WALL_HEIGHT = 4.0
 WALL_THICKNESS = 0.2
@@ -1606,7 +1606,7 @@ def main():
     exit_y = (MAZE_HEIGHT / 2) * CELL_SIZE - CELL_SIZE
     guardian = Guardian(exit_x, exit_y, 0)
     
-    spawn_enemies(maze, count=8)   # choose count as you like
+    spawn_enemies(maze, count=14)   # choose count as you like
     for e in ENEMIES: print("ENEMY", e.type, e.x, e.y)
     
     glutDisplayFunc(showScreen)
