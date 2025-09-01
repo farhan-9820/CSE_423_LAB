@@ -992,6 +992,43 @@ class Maze:
 
     def get_walls_vertices(self):
         walls = []
+        # boundary walls around the entire maze
+        maze_width_world = self.width * CELL_SIZE
+        maze_height_world = self.height * CELL_SIZE
+        
+        # North boundary wall
+        walls.extend([
+            (-maze_width_world/2, maze_height_world/2, 0),
+            (maze_width_world/2, maze_height_world/2, 0),
+            (maze_width_world/2, maze_height_world/2, WALL_HEIGHT),
+            (-maze_width_world/2, maze_height_world/2, WALL_HEIGHT),
+        ])
+        
+        # South boundary wall
+        walls.extend([
+            (maze_width_world/2, -maze_height_world/2, 0),
+            (-maze_width_world/2, -maze_height_world/2, 0),
+            (-maze_width_world/2, -maze_height_world/2, WALL_HEIGHT),
+            (maze_width_world/2, -maze_height_world/2, WALL_HEIGHT),
+        ])
+        
+        # East boundary wall
+        walls.extend([
+            (maze_width_world/2, maze_height_world/2, 0),
+            (maze_width_world/2, -maze_height_world/2, 0),
+            (maze_width_world/2, -maze_height_world/2, WALL_HEIGHT),
+            (maze_width_world/2, maze_height_world/2, WALL_HEIGHT),
+        ])
+        
+        # West boundary wall
+        walls.extend([
+            (-maze_width_world/2, -maze_height_world/2, 0),
+            (-maze_width_world/2, maze_height_world/2, 0),
+            (-maze_width_world/2, maze_height_world/2, WALL_HEIGHT),
+            (-maze_width_world/2, -maze_height_world/2, WALL_HEIGHT),
+        ])
+        
+        # add internal maze walls
         for x in range(self.width):
             for y in range(self.height):
                 cell = self.grid[x][y]
@@ -1029,6 +1066,18 @@ class Maze:
         return walls
 
     def would_collide(self, x, y, radius):
+        # check boundary walls first
+        maze_width_world = self.width * CELL_SIZE
+        maze_height_world = self.height * CELL_SIZE
+        
+        # check if outside maze boundaries
+        if (x - radius < -maze_width_world/2 or 
+            x + radius > maze_width_world/2 or 
+            y - radius < -maze_height_world/2 or 
+            y + radius > maze_height_world/2):
+            return True
+            
+        
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
                 fx = (x / CELL_SIZE) + (self.width / 2)
@@ -1062,16 +1111,27 @@ class Maze:
                         return True
         return False
 
-    def check_line_of_sight(self, start_x, start_y, end_x, end_y):
-        """Checks if there's a clear path between two points."""
-        num_steps = 100
-        for i in range(num_steps + 1):
-            t = i / float(num_steps)
-            check_x = start_x + (end_x - start_x) * t
-            check_y = start_y + (end_y - start_y) * t
-            if self.would_collide(check_x, check_y, 0.5):
-                return False
-        return True
+
+
+
+def draw_floor():
+    """Renders the ground plane of the maze."""
+    glPushMatrix()
+    glColor3fv(FLOOR_COLOR)
+    glBegin(GL_QUADS)
+    
+    size_x = MAZE_WIDTH * CELL_SIZE
+    size_z = MAZE_HEIGHT * CELL_SIZE
+    
+    
+    glVertex3f(-size_x / 2 - CELL_SIZE/2, -size_z / 2 - CELL_SIZE/2, 0)
+    glVertex3f(size_x / 2 - CELL_SIZE/2, -size_z / 2 - CELL_SIZE/2, 0)
+    glVertex3f(size_x / 2 - CELL_SIZE/2, size_z / 2 - CELL_SIZE/2, 0)
+    glVertex3f(-size_x / 2 - CELL_SIZE/2, size_z / 2 - CELL_SIZE/2, 0)
+    
+    
+    glEnd()
+    glPopMatrix()
     
 
 def draw_floor():
